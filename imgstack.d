@@ -37,7 +37,7 @@ int main(string[] args)
         "op", "Stacking operation to perform", &operation,
         "d|darkframe", "Dark frame image to subtract before stacking frames", &darkframe,
         std.getopt.config.required, "o|out", "Output file", &outFile,
-        "y|overwrite", "Overwrite output", &overwrite,
+        "y|overwrite", "Force overwrite output file", &overwrite,
     );
     
     if(res.helpWanted)
@@ -71,24 +71,16 @@ int main(string[] args)
             return 1;
         }
     
-    /* auto imgs = args.map!(f => read_image(f, ColFmt.RGB)).array;
-    auto darkImg = darkframe.length > 0 ? read_image(darkframe, ColFmt.RGB) : IFImage.init;
-    auto outImg = stack(imgs, darkImg);
-    
-    write_image(outFile, outImg.w, outImg.h, outImg.pixels, ColFmt.RGB); */
-    
     IFImage outImg;
     
     switch(operation)
     {
-        case Op.average:
-            outImg = avgSum(args, darkframe, false);
-            break;
-        case Op.sum:
-            outImg = avgSum(args, darkframe, true);
-            break;
         case Op.median:
             outImg = median(args, darkframe);
+            break;
+        case Op.average:
+        case Op.sum:
+            outImg = avgSum(args, darkframe, operation == Op.sum);
             break;
         case Op.min:
         case Op.max:
@@ -104,32 +96,29 @@ int main(string[] args)
     return 0;
 }
 
-/* double[3] floatingColor(ubyte[3] color)
-{
-    double[3] result;
-    
-    foreach(index, ref val; result)
-        val = color[index] / 255.0;
-    
-    return result;
-}
-
-ubyte[3] discreteColor(double[3] color)
-{
-    ubyte[3] result;
-    
-    foreach(index, ref val; result)
-        val = cast(ubyte)(color[index] * 255);
-    
-    return result;
-} */
-
 Out[length] arrayCast(Out, Arr: In[length], In, size_t length)(Arr v)
 {
     Out[length] result;
     
     static foreach(index; 0 .. length)
         result[index] = cast(Out)v[index];
+    
+    return result;
+}
+
+ubyte[] loadDarkframe(string file, int width, int height)
+{
+    ubyte[] result = null;
+    
+    if(file.length > 0)
+    {
+        auto img = read_image(file, ColFmt.RGB);
+        
+        enforce(img.w == width && img.h == height, "mismatched dark frame dimensions");
+        logf("loaded dark frame %s", file);
+        
+        result = img.pixels;
+    }
     
     return result;
 }
@@ -143,17 +132,7 @@ IFImage avgSum(string[] inputFiles, string darkframeFile = null, bool sum = fals
     read_image_info(inputFiles[0], w, h, channels);
     
     ulong[] stackbuf = new ulong[w * h * 3];
-    ubyte[] darkframe = null;
-    
-    if(darkframeFile.length > 0)
-    {
-        auto img = read_image(darkframeFile, ColFmt.RGB);
-        
-        enforce(img.w == w && img.h == h, "mismatched dark frame dimensions");
-        logf("loaded dark frame %s", darkframeFile);
-        
-        darkframe = img.pixels;
-    }
+    auto darkframe = loadDarkframe(darkframeFile, w, h);
     
     foreach(file; inputFiles)
     {
@@ -177,7 +156,6 @@ IFImage avgSum(string[] inputFiles, string darkframeFile = null, bool sum = fals
     }
     
     if(!sum) stackbuf[] /= inputFiles.length;
-    
     auto result = IFImage(w, h, ColFmt.RGB, new ubyte[w * h * 3]);
     
     foreach(y; iota(h).parallel)
@@ -188,37 +166,6 @@ IFImage avgSum(string[] inputFiles, string darkframeFile = null, bool sum = fals
             auto thin = arrayCast!ubyte(val);
             result.pixels.ptr[index .. index + 3] = thin;
         }
-    
-    /* assert(input.all!(i => i.c == ColFmt.RGB));
-    enforce(input.all!(i => i.w == w && i.h == h), "Mismatched image dimensions");
-    enforce(!haveDarkframe ? true : darkframe.w == w && darkframe.h == h, "Mismatched dark frame dimensions");
-    
-    auto result = IFImage(w, h, ColFmt.RGB, new ubyte[w * h * 3]);
-    
-    foreach(y; 0 .. h)
-    {
-        foreach(x; iota(w).parallel)
-        {
-            const index = (w * y + x) * 3;
-            double[3] pixel = 0;
-            
-            foreach(img; input)
-            {
-                ubyte[3] sample = img.pixels.ptr[index .. index + 3];
-                
-                if(haveDarkframe)
-                    sample[] -= darkframe.pixels.ptr[index .. index + 3];
-                
-                pixel[] += floatingColor(sample)[];
-            }
-            
-            pixel[] /= input.length;
-            result.pixels.ptr[index .. index + 3] = discreteColor(pixel);
-        }
-        
-        if(y % 100 == 0)
-            logf("stacking progress: %d/%d lines", y, h);
-    } */
     
     return result;
 }
@@ -231,18 +178,7 @@ IFImage median(string[] inputFiles, string darkframeFile)
     
     read_image_info(inputFiles[0], w, h, channels);
     
-    ubyte[] darkframe = null;
-    
-    if(darkframeFile.length > 0)
-    {
-        auto img = read_image(darkframeFile, ColFmt.RGB);
-        
-        enforce(img.w == w && img.h == h, "mismatched dark frame dimensions");
-        logf("loaded dark frame %s", darkframeFile);
-        
-        darkframe = img.pixels;
-    }
-    
+    ubyte[] darkframe = loadDarkframe(darkframeFile, w, h);
     IFImage[] images = inputFiles
         .tee!(f => {
             import core.memory: GC;
@@ -295,19 +231,7 @@ IFImage minMax(string[] inputFiles, string darkframeFile, bool maxVal)
     
     read_image_info(inputFiles[0], w, h, channels);
     
-    ulong[] stackbuf = new ulong[w * h * 3];
-    ubyte[] darkframe = null;
-    
-    if(darkframeFile.length > 0)
-    {
-        auto img = read_image(darkframeFile, ColFmt.RGB);
-        
-        enforce(img.w == w && img.h == h, "mismatched dark frame dimensions");
-        logf("loaded dark frame %s", darkframeFile);
-        
-        darkframe = img.pixels;
-    }
-    
+    ubyte[] darkframe = loadDarkframe(darkframeFile, w, h);
     auto result = IFImage(w, h, ColFmt.RGB, new ubyte[w * h * 3]);
     
     // when getting minval, must start from brightest possible pixel value
