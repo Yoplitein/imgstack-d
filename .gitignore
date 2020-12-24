@@ -1,0 +1,15 @@
+*.exe
+*.lst
+*.o
+*.obj
+.dub
+/imgstack
+__dummy.html
+docs.json
+docs/
+imgstack-test-*
+imgstack.a
+imgstack.dll
+imgstack.dylib
+imgstack.lib
+imgstack.so
